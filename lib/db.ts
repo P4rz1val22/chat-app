@@ -1,4 +1,3 @@
-// src/lib/db.ts
 import { Pool } from "@neondatabase/serverless";
 
 export function createPool() {

@@ -1,5 +1,4 @@
-// src/lib/auth.ts
-import NextAuth, { NextAuthOptions } from "next-auth";
+import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import PostgresAdapter from "@auth/pg-adapter";
 import { createPool } from "./db";
@@ -25,8 +24,3 @@ export const authOptions: NextAuthOptions = {
     },
   },
 };
-
-export default NextAuth(authOptions);
-
-// Export types for TypeScript
-export type { Session } from "next-auth";
