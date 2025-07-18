@@ -1,7 +1,12 @@
 // types/index.ts
 // 🎯 Centralized type definitions for the chat application
 
+import { Server as SocketIOServer } from "socket.io";
+import { Server as NetServer } from "http";
+import { Socket as NetSocket } from "net";
+import { NextApiResponse } from "next";
 import { Session } from "next-auth";
+import { Socket } from "socket.io-client";
 
 // =============================================================================
 // CORE ENTITIES
@@ -40,6 +45,37 @@ export interface Message {
 }
 
 // =============================================================================
+// ROOM CREATION
+// =============================================================================
+
+export interface CreateRoomData {
+  name: string;
+  type: "dm" | "group" | "public_channel";
+  isPrivate: boolean;
+  createdById: string;
+}
+
+export interface RoomCreatedData {
+  room: Room;
+  createdBy: string;
+}
+
+export interface RoomListUpdateData {
+  rooms: Room[];
+}
+
+export interface DbRoomWithMembers {
+  id: number;
+  name: string;
+  type: string;
+  is_private: boolean;
+  created_by: number;
+  created_at: Date;
+  member_count: number;
+}
+
+// types/index.ts - Updated Socket.IO Event Interfaces
+// =============================================================================
 // SOCKET.IO EVENTS
 // =============================================================================
 
@@ -48,6 +84,10 @@ export interface ClientToServerEvents {
   // Room management
   join_room: (data: JoinRoomData) => void;
   switch_room: (data: SwitchRoomData) => void;
+  create_room: (data: CreateRoomData) => void;
+  get_rooms: (data: GetRoomsData) => void;
+  get_room_members: (data: GetRoomMembersData) => void;
+  add_member: (data: AddMemberData) => void;
 
   // Messaging
   send_chat_message: (data: SendMessageData) => void;
@@ -72,6 +112,13 @@ export interface ServerToClientEvents {
   message_history: (data: MessageHistoryData) => void;
   message_error: (data: MessageErrorData) => void;
 
+  // Room management
+  room_created: (data: RoomCreatedData) => void;
+  rooms_list: (data: RoomListUpdateData) => void;
+  room_members: (data: RoomMembersData) => void;
+  member_added: (data: MemberAddedData) => void;
+  user_rooms_updated: (data: UserRoomsUpdatedData) => void;
+
   // Typing indicators
   user_typing: (data: TypingEventData) => void;
   user_stopped_typing: (data: TypingEventData) => void;
@@ -91,6 +138,84 @@ export interface JoinRoomData {
   room: string;
   username: string;
   userId?: string;
+}
+
+export interface GetRoomsData {
+  username: string;
+  email: string;
+}
+
+export interface GetRoomMembersData {
+  roomId: string;
+}
+
+export interface RoomMembersData {
+  roomId: string;
+  members: RoomMember[];
+}
+
+export interface RoomMember {
+  id: string;
+  name: string;
+  email?: string;
+  username?: string;
+}
+
+export interface AddMemberData {
+  roomId: string;
+  email: string;
+  addedBy: string;
+}
+export interface MemberAddedData {
+  roomId: string;
+  email: string;
+  success: boolean;
+}
+
+export interface UserRoomsUpdatedData {
+  userId: string;
+  rooms: Room[];
+}
+
+export interface RoomListUpdateData {
+  rooms: Room[];
+}
+
+export interface AddMemberData {
+  roomId: string;
+  email: string;
+  addedBy: string;
+}
+
+export interface MemberAddedData {
+  roomId: string;
+  email: string;
+  success: boolean;
+}
+
+export interface GetRoomsData {
+  userId: string; // Just need user ID, get username/email from database
+}
+
+export interface GetRoomMembersData {
+  roomId: string;
+}
+
+export interface RoomMembersData {
+  roomId: string;
+  members: RoomMember[];
+}
+
+export interface RoomMember {
+  id: string;
+  name: string;
+  email?: string;
+  username?: string;
+}
+
+export interface UserRoomsUpdatedData {
+  userId: string;
+  rooms: Room[];
 }
 
 export interface SwitchRoomData {
@@ -179,6 +304,12 @@ export interface TypingIndicatorProps {
   className?: string;
 }
 
+export interface CreateRoomModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreateRoom: (roomData: CreateRoomForm) => void;
+}
+
 export interface MessageListProps {
   messages: Message[];
   currentUserId: string;
@@ -222,14 +353,15 @@ export interface MessageInputProps {
   placeholder?: string;
 }
 
+// types/index.ts - Updated HOOK RETURN TYPES section
 // =============================================================================
 // HOOK RETURN TYPES
 // =============================================================================
 
 export interface UseSocketReturn {
   isConnected: boolean;
-  socket: any; // Socket instance
-  connect: () => void;
+  socket: Socket | null;
+  connect: () => Socket;
   disconnect: () => void;
   emit: (event: string, data: any) => void;
 }
@@ -334,4 +466,66 @@ export interface UserPreferences {
   notifications: boolean;
   soundEnabled: boolean;
   theme: "light" | "dark" | "system";
+}
+
+// =============================================================================
+// DATABASE INTERFACES
+// =============================================================================
+
+export interface DbRoom {
+  id: number;
+  name: string;
+  type: string;
+  created_by: number;
+  is_private: boolean;
+  created_at: Date;
+}
+
+export interface DbRoomWithMemberCount {
+  id: number;
+  name: string;
+  type: string;
+  created_by: number;
+  is_private: boolean;
+  created_at: Date;
+  member_count: number;
+}
+
+export interface DbUser {
+  id: number;
+  name: string;
+  email?: string;
+  username: string;
+}
+
+export interface DbMessage {
+  id: number;
+  room_id: number;
+  user_id: number;
+  content: string;
+  sent_at: Date;
+}
+
+export interface DbMessageWithUser {
+  id: number;
+  content: string;
+  sent_at: Date;
+  username: string;
+  user_id: number;
+}
+
+// =============================================================================
+// SOCKET.IO INTERFACES
+// =============================================================================
+
+export interface SocketServer extends NetServer {
+  io?: SocketIOServer<ClientToServerEvents, ServerToClientEvents> | undefined;
+}
+
+export interface SocketWithIO extends NetSocket {
+  server: SocketServer;
+}
+
+export interface NextApiResponseWithSocket extends NextApiResponse {
+  socket: SocketWithIO;
 }

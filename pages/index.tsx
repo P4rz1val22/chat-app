@@ -2,7 +2,9 @@
 import { useSession } from "next-auth/react";
 import { useState, useEffect, useRef } from "react";
 import AuthButton from "@/components/auth-button";
-import socketService from "@/lib/socket";
+import ChatHeader from "@/components/chat-header";
+import { useSocket } from "@/hooks/use-socket";
+import { useTyping } from "@/hooks/use-typing";
 import type {
   Message,
   Room,
@@ -10,33 +12,38 @@ import type {
   ChatMessageData,
   JoinRoomData,
   SwitchRoomData,
-  TypingData,
   MessageHistoryData,
   MessageErrorData,
-  TypingEventData,
+  ExtendedSession,
+  CreateRoomForm,
 } from "../types";
 import TypingIndicator from "@/components/typing-indicator";
 import MessageList from "@/components/message-list";
 import RoomSidebar from "@/components/room-sidebar";
+import MessageInput from "@/components/message-input";
+import RoomHeader from "@/components/room-header";
+import CreateRoomModal from "@/components/create-room-modal";
+import RoomManageModal from "@/components/room-manage-modal";
 
 export default function Home() {
   const { data: session } = useSession();
-  const [currentRoom, setCurrentRoom] = useState("general");
+  const [currentRoom, setCurrentRoom] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [rooms, setRooms] = useState<Room[]>([
-    { id: "general", name: "General", memberCount: 1 },
-    { id: "random", name: "Random", memberCount: 0 },
-    { id: "tech", name: "Tech Talk", memberCount: 0 },
-  ]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [roomSearch, setRoomSearch] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
-
-  const [typingUsers, setTypingUsers] = useState<string[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const [isCreateRoomModalOpen, setIsCreateRoomModalOpen] = useState(false);
+  const [isRoomManageModalOpen, setIsRoomManageModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const { socket, isConnected, connect } = useSocket();
+  const { typingUsers, startTyping, stopTyping, handleInputChange } = useTyping(
+    {
+      socket,
+      currentRoom,
+      session: session as ExtendedSession,
+    }
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -46,65 +53,52 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  const startTyping = () => {
-    const socket = socketService.getSocket();
-    if (!socket?.connected || !session) return;
-
-    if (!isTyping) {
-      setIsTyping(true);
-      const typingData: TypingData = {
-        room: currentRoom,
-        username: session.user?.name || "Anonymous",
-        userId: (session as any).user?.id || "unknown",
-      };
-      socket.emit("user_typing_start", typingData);
+  useEffect(() => {
+    if (session) {
+      console.log("🔍 Session data:", session);
+      console.log("🔍 User ID:", session.user?.id);
+      console.log("🔍 User email:", session.user?.email);
     }
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    typingTimeoutRef.current = setTimeout(() => {
-      stopTyping();
-    }, 3000);
-  };
-
-  const stopTyping = () => {
-    const socket = socketService.getSocket();
-    if (!socket?.connected || !session) return;
-
-    if (isTyping) {
-      setIsTyping(false);
-      const typingData: TypingData = {
-        room: currentRoom,
-        username: session.user?.name || "Anonymous",
-        userId: (session as any).user?.id || "unknown",
-      };
-      socket.emit("user_typing_stop", typingData);
-    }
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-  };
+  }, [session]);
 
   useEffect(() => {
     if (!session) return;
 
-    const socket = socketService.connect();
+    const socketInstance = connect();
 
     const handleConnect = () => {
-      setIsConnected(true);
-      const joinData: JoinRoomData = {
-        room: currentRoom,
-        username: session.user?.name || "Anonymous",
-      };
-      socket.emit("join_room", joinData);
+      console.log("🔌 Connected to socket, fetching rooms...");
+
+      // FIXED: Just get rooms, don't join any room yet
+      socketInstance.emit("get_rooms", {
+        userId: session.user?.id || "",
+      });
     };
 
-    const handleDisconnect = () => {
-      setIsConnected(false);
+    const handleRoomsList = (data: { rooms: Room[] }) => {
+      console.log("📋 Received rooms list:", data.rooms);
+      setRooms(data.rooms);
+
+      // FIXED: Auto-select and join first room if available
+      if (isInitialLoad && data.rooms.length > 0 && !currentRoom) {
+        const firstRoom = data.rooms[0];
+        console.log(
+          `🏠 Auto-selecting first room: ${firstRoom.name} (${firstRoom.id})`
+        );
+
+        // Set current room first
+        setCurrentRoom(firstRoom.id);
+        setIsInitialLoad(false);
+
+        // FIXED: Join room with proper validation
+        if (firstRoom.id && firstRoom.id !== "") {
+          const joinData: JoinRoomData = {
+            room: firstRoom.id,
+            username: session.user?.name || "Anonymous",
+          };
+          socketInstance.emit("join_room", joinData);
+        }
+      }
     };
 
     const handleChatMessage = (data: ChatMessageData) => {
@@ -167,90 +161,83 @@ export default function Home() {
       }
     };
 
-    const handleUserTyping = (data: TypingEventData) => {
-      const currentUserId = (session as any)?.user?.id;
-      const isFromCurrentUser = data.userId === currentUserId;
-
-      if (data.room === currentRoom && !isFromCurrentUser) {
-        setTypingUsers((prev) => {
-          if (!prev.includes(data.username)) {
-            return [...prev, data.username];
-          }
-          return prev;
-        });
-      }
-    };
-
-    const handleUserStoppedTyping = (data: TypingEventData) => {
-      const currentUserId = (session as any)?.user?.id;
-      const isFromCurrentUser = data.userId === currentUserId;
-
-      if (data.room === currentRoom && !isFromCurrentUser) {
-        setTypingUsers((prev) => prev.filter((user) => user !== data.username));
-      }
-    };
-
     const handleError = (error: any) => {
       console.error("❌ Socket error:", error);
     };
 
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
-    socket.on("chat_message", handleChatMessage);
-    socket.on("message_history", handleMessageHistory);
-    socket.on("message_error", handleMessageError);
-    socket.on("user_typing", handleUserTyping);
-    socket.on("user_stopped_typing", handleUserStoppedTyping);
-    socket.on("error", handleError);
+    const handleRoomCreated = (data: any) => {
+      console.log("🏗️ Room created:", data);
 
-    if (socket.connected) {
+      setRooms((prev) => [...prev, data.room]);
+
+      if (data.createdBy === session.user?.name) {
+        console.log("🚪 Auto-switching to new room:", data.room.name);
+        setCurrentRoom(data.room.id);
+        setMessages([]);
+        setIsInitialLoad(false);
+      }
+    };
+
+    const handleUserRoomsUpdated = (data: {
+      userId: string;
+      rooms: Room[];
+    }) => {
+      const currentUserId = (session as any)?.user?.id?.toString();
+      if (data.userId === currentUserId) {
+        console.log("📋 Received room update for current user:", data.rooms);
+        setRooms(data.rooms);
+      }
+    };
+
+    socketInstance.on("connect", handleConnect);
+    socketInstance.on("chat_message", handleChatMessage);
+    socketInstance.on("message_history", handleMessageHistory);
+    socketInstance.on("message_error", handleMessageError);
+    socketInstance.on("room_created", handleRoomCreated);
+    socketInstance.on("rooms_list", handleRoomsList);
+    socketInstance.on("user_rooms_updated", handleUserRoomsUpdated);
+    socketInstance.on("error", handleError);
+
+    if (socketInstance.connected) {
       handleConnect();
     }
 
     return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("chat_message", handleChatMessage);
-      socket.off("message_history", handleMessageHistory);
-      socket.off("message_error", handleMessageError);
-      socket.off("user_typing", handleUserTyping);
-      socket.off("user_stopped_typing", handleUserStoppedTyping);
-      socket.off("error", handleError);
-
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-      if (typingDebounceRef.current) {
-        clearTimeout(typingDebounceRef.current);
-      }
+      socketInstance.off("connect", handleConnect);
+      socketInstance.off("chat_message", handleChatMessage);
+      socketInstance.off("message_history", handleMessageHistory);
+      socketInstance.off("message_error", handleMessageError);
+      socketInstance.off("room_created", handleRoomCreated);
+      socketInstance.off("rooms_list", handleRoomsList);
+      socketInstance.off("user_rooms_updated", handleUserRoomsUpdated);
+      socketInstance.off("error", handleError);
     };
-  }, [session, currentRoom]);
+  }, [session, currentRoom, connect, isInitialLoad]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setNewMessage(e.target.value);
-
-    if (typingDebounceRef.current) {
-      clearTimeout(typingDebounceRef.current);
-    }
-
-    if (e.target.value.trim()) {
-      typingDebounceRef.current = setTimeout(() => {
-        startTyping();
-      }, 500);
-    } else {
-      stopTyping();
-    }
+  const handleMessageInputChange = (value: string) => {
+    setNewMessage(value);
+    handleInputChange(value);
   };
 
   const sendMessage = () => {
-    if (!newMessage.trim() || !session) return;
+    if (!newMessage.trim() || !session || !socket?.connected) return;
 
-    const socket = socketService.getSocket();
-    if (!socket?.connected) return;
+    // FIXED: Validate current room
+    if (!currentRoom || currentRoom === "") {
+      console.error("❌ No room selected");
+      return;
+    }
 
-    if (typingDebounceRef.current) {
-      clearTimeout(typingDebounceRef.current);
-      typingDebounceRef.current = null;
+    // FIXED: Validate user ID
+    if (!session.user?.id) {
+      console.error("❌ No user ID available");
+      return;
+    }
+
+    const currentRoomData = rooms.find((room) => room.id === currentRoom);
+    if (!currentRoomData) {
+      console.error("❌ Current room not found in rooms list");
+      return;
     }
 
     stopTyping();
@@ -263,7 +250,7 @@ export default function Home() {
       text: messageText,
       username: session.user?.name || "Anonymous",
       timestamp: new Date().toLocaleTimeString(),
-      userId: (session as any).user?.id || "unknown",
+      userId: session.user?.id || "unknown",
       isOptimistic: true,
     };
 
@@ -273,7 +260,7 @@ export default function Home() {
     const sendData: SendMessageData = {
       message: messageText,
       username: session.user?.name || "Anonymous",
-      userId: (session as any).user?.id || "unknown",
+      userId: session.user?.id || "unknown",
       room: currentRoom,
       tempId: tempId,
     };
@@ -281,34 +268,58 @@ export default function Home() {
     socket.emit("send_chat_message", sendData);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
   const filteredRooms = rooms.filter((room) =>
     room.name.toLowerCase().includes(roomSearch.toLowerCase())
   );
 
+  const handleCreateRoom = async (roomData: CreateRoomForm) => {
+    if (!socket?.connected || !session) return;
+
+    const createData = {
+      ...roomData,
+      createdById: session.user?.id || "unknown",
+    };
+
+    socket.emit("create_room", createData);
+  };
+
+  const handleAddMember = (email: string) => {
+    if (!socket?.connected || !session) return;
+
+    socket.emit("add_member", {
+      roomId: currentRoom,
+      email: email,
+      addedBy: session.user?.id || "unknown",
+    });
+  };
+
   const switchRoom = (newRoomId: string) => {
-    const socket = socketService.getSocket();
+    if (!socket?.connected || !session) return;
+
+    // FIXED: Validate room ID before switching
+    if (!newRoomId || newRoomId === "") {
+      console.error("❌ Cannot switch to empty room ID");
+      return;
+    }
+
+    // Validate room exists
+    const roomExists = rooms.find((room) => room.id === newRoomId);
+    if (!roomExists) {
+      console.error(`❌ Room ${newRoomId} not found`);
+      return;
+    }
 
     stopTyping();
 
-    if (socket?.connected) {
-      const switchData: SwitchRoomData = {
-        oldRoom: currentRoom,
-        newRoom: newRoomId,
-        username: session?.user?.name || "Anonymous",
-      };
-      socket.emit("switch_room", switchData);
-    }
+    const switchData: SwitchRoomData = {
+      oldRoom: currentRoom || "none", // Handle empty currentRoom
+      newRoom: newRoomId,
+      username: session?.user?.name || "Anonymous",
+    };
+    socket.emit("switch_room", switchData);
 
     setCurrentRoom(newRoomId);
     setMessages([]);
-    setTypingUsers([]);
   };
 
   if (!session) {
@@ -325,36 +336,56 @@ export default function Home() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-white shadow-sm border-b">
-        <div className="flex justify-between items-center px-6 py-4">
-          <h1 className="text-xl font-bold text-gray-800">Chat App</h1>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  isConnected ? "bg-green-500" : "bg-red-500"
-                }`}
-              ></div>
-              <span className="text-sm text-gray-600">
-                {isConnected ? "Connected" : "Disconnected"}
-              </span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <img
-                src={session.user?.image || ""}
-                alt="Profile"
-                className="w-8 h-8 rounded-full"
-              />
-              <span className="text-sm text-gray-700">
-                {session.user?.name}
-              </span>
-            </div>
-            <AuthButton />
+  if (isInitialLoad && rooms.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-100">
+        <ChatHeader
+          session={session as ExtendedSession}
+          isConnected={isConnected}
+        />
+        <div className="flex h-[calc(100vh-73px)] items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading your rooms...</p>
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (rooms.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-100">
+        <ChatHeader
+          session={session as ExtendedSession}
+          isConnected={isConnected}
+        />
+        <div className="flex h-[calc(100vh-73px)] items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">
+              No rooms available
+            </h2>
+            <p className="text-gray-600 mb-6">
+              Create your first room to start chatting!
+            </p>
+            <button
+              onClick={() => setIsCreateRoomModalOpen(true)}
+              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+            >
+              Create Room
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <ChatHeader
+        session={session as ExtendedSession}
+        isConnected={isConnected}
+      />
 
       <div className="flex h-[calc(100vh-73px)]">
         <RoomSidebar
@@ -363,58 +394,63 @@ export default function Home() {
           roomSearch={roomSearch}
           onRoomChange={switchRoom}
           onRoomSearchChange={setRoomSearch}
-          onAddRoom={() => {
-            console.log("Add new room clicked");
-            // You can implement room creation logic here later
-          }}
+          onAddRoom={() => setIsCreateRoomModalOpen(true)}
         />
 
         <div className="flex-1 flex flex-col">
-          <div className="bg-white border-b border-gray-200 px-6 py-4">
-            <div className="flex items-center space-x-2">
-              <span className="text-lg">#</span>
-              <h2 className="text-lg font-semibold capitalize">
-                {currentRoom}
-              </h2>
-              <span className="text-sm text-gray-500">
-                • {rooms.find((r) => r.id === currentRoom)?.memberCount || 0}{" "}
-                members
-              </span>
-            </div>
-          </div>
-
-          <MessageList
-            messages={messages}
-            currentUserId={(session as any)?.user?.id || "unknown"}
-            onRetryMessage={(messageId) => {
-              console.log("Retry message:", messageId);
-              // You can implement retry logic here later
-            }}
-            ref={messagesEndRef}
-          />
-          <TypingIndicator typingUsers={typingUsers} />
-          <div className="bg-white border-t border-gray-200 p-4 z-10">
-            <div className="flex space-x-4">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={handleInputChange}
-                onKeyPress={handleKeyPress}
-                placeholder={`Message #${currentRoom}`}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={!isConnected}
+          {/* FIXED: Only show room header and messages if a room is selected */}
+          {currentRoom ? (
+            <>
+              <RoomHeader
+                currentRoom={currentRoom}
+                rooms={rooms}
+                onRoomSettingsClick={() => setIsRoomManageModalOpen(true)}
               />
-              <button
-                onClick={sendMessage}
-                disabled={!newMessage.trim() || !isConnected}
-                className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-              >
-                Send
-              </button>
+              <MessageList
+                messages={messages}
+                currentUserId={session.user?.id || "unknown"}
+                onRetryMessage={(messageId) => {
+                  console.log("Retry message:", messageId);
+                }}
+                ref={messagesEndRef}
+              />
+              <TypingIndicator typingUsers={typingUsers} />
+              <MessageInput
+                value={newMessage}
+                onChange={handleMessageInputChange}
+                onSend={sendMessage}
+                onTyping={startTyping}
+                onStopTyping={stopTyping}
+                disabled={!isConnected}
+                placeholder={`Message #${currentRoom}`}
+              />
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <h2 className="text-xl font-semibold text-gray-800 mb-2">
+                  Select a room to start chatting
+                </h2>
+                <p className="text-gray-600">Choose a room from the sidebar</p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
+
+      {/* Modals */}
+      <CreateRoomModal
+        isOpen={isCreateRoomModalOpen}
+        onClose={() => setIsCreateRoomModalOpen(false)}
+        onCreateRoom={handleCreateRoom}
+      />
+
+      <RoomManageModal
+        isOpen={isRoomManageModalOpen}
+        onClose={() => setIsRoomManageModalOpen(false)}
+        room={rooms.find((room) => room.id === currentRoom) || null}
+        onAddMember={handleAddMember}
+      />
     </div>
   );
 }

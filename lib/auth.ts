@@ -1,10 +1,11 @@
+// lib/auth.ts - FIXED FOR NEON
 import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import PostgresAdapter from "@auth/pg-adapter";
-import { createPool } from "./db";
+import { getPool } from "./db"; // Use our new pool function
 
 export const authOptions: NextAuthOptions = {
-  adapter: PostgresAdapter(createPool()),
+  adapter: PostgresAdapter(getPool()), // Use the shared pool
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -12,15 +13,30 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    session: ({ session, user }) => {
-      return {
-        ...session,
-        user: {
-          ...session.user,
-          id: user.id,
-          // Add username when we implement user creation
-        },
-      };
+    session: async ({ session, user }) => {
+      if (user?.id) {
+        return {
+          ...session,
+          user: {
+            ...session.user,
+            id: user.id,
+          },
+        };
+      }
+      return session;
+    },
+
+    jwt: async ({ token, user }) => {
+      if (user?.id) {
+        token.id = user.id;
+      }
+      return token;
     },
   },
+
+  session: {
+    strategy: "database",
+  },
+
+  debug: process.env.NODE_ENV === "development",
 };
