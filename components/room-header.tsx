@@ -1,12 +1,4 @@
-// components/room-header.tsx
-import { Room } from "@/types";
-
-interface RoomHeaderProps {
-  currentRoom: string;
-  rooms: Room[];
-  onRoomSettingsClick?: () => void;
-  onAddMembersClick?: () => void;
-}
+import { Room, RoomHeaderProps } from "@/types";
 
 export default function RoomHeader({
   currentRoom,
@@ -18,31 +10,37 @@ export default function RoomHeader({
   const memberCount = currentRoomData?.memberCount || 0;
 
   return (
-    <div className="bg-white border-b border-gray-200 px-6 py-4">
+    <header className="bg-white border-b border-gray-200 px-6 py-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <span className="text-lg">#</span>
+          <span className="text-lg" aria-hidden="true">
+            #
+          </span>
           <h2 className="text-lg font-semibold capitalize">
-            {currentRoomData?.name}
+            {currentRoomData?.name || "Select a room"}
           </h2>
           <span className="text-sm text-gray-500">
             • {memberCount} {memberCount === 1 ? "member" : "members"}
           </span>
         </div>
 
-        {/* 🎯 PREP FOR ROOM MANAGEMENT FEATURES */}
-        <div className="flex items-center space-x-2">
+        <div
+          className="flex items-center space-x-2"
+          role="toolbar"
+          aria-label="Room actions"
+        >
           {onAddMembersClick && (
             <button
               onClick={onAddMembersClick}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
-              title="Add members"
+              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              aria-label="Add members to room"
             >
               <svg
                 className="w-5 h-5"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -57,14 +55,15 @@ export default function RoomHeader({
           {onRoomSettingsClick && (
             <button
               onClick={onRoomSettingsClick}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
-              title="Room settings"
+              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+              aria-label="Open room settings"
             >
               <svg
                 className="w-5 h-5"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -83,6 +82,6 @@ export default function RoomHeader({
           )}
         </div>
       </div>
-    </div>
+    </header>
   );
 }

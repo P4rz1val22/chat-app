@@ -1,4 +1,3 @@
-// components/typing-indicator.tsx
 import type { TypingIndicatorProps } from "../types";
 
 export default function TypingIndicator({
@@ -12,28 +11,36 @@ export default function TypingIndicator({
     return `${users[0]} and ${users.length - 1} others are typing...`;
   };
 
+  const typingText = getTypingText(typingUsers);
+  const isVisible = typingUsers.length > 0;
+
   return (
     <div
       className={`bg-white border-gray-300 border-t border-r shadow-sm mr-28 z-0 rounded-tr-2xl text-gray-400 text-sm flex items-center p-3 transition-all duration-300 ease-in-out transform ${
-        typingUsers.length > 0
+        isVisible
           ? "translate-y-0 max-h-16"
           : "translate-y-7 max-h-0 overflow-hidden"
       } ${className}`}
+      role="status"
+      aria-live="polite"
+      aria-label={isVisible ? typingText : "No one is typing"}
     >
-      <div className="flex items-center space-x-2">
-        <div className="flex space-x-1">
-          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-          <div
-            className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-            style={{ animationDelay: "0.1s" }}
-          ></div>
-          <div
-            className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-            style={{ animationDelay: "0.2s" }}
-          ></div>
+      {isVisible && (
+        <div className="flex items-center space-x-2">
+          <div className="flex space-x-1" aria-hidden="true">
+            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+            <div
+              className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+              style={{ animationDelay: "0.1s" }}
+            ></div>
+            <div
+              className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+              style={{ animationDelay: "0.2s" }}
+            ></div>
+          </div>
+          <span>{typingText}</span>
         </div>
-        <span>{getTypingText(typingUsers)}</span>
-      </div>
+      )}
     </div>
   );
 }

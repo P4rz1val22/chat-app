@@ -1,18 +1,12 @@
-// hooks/use-typing.ts
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Socket } from "socket.io-client";
+import { Session } from "next-auth";
 import type {
   TypingData,
   TypingEventData,
+  UseTypingProps,
   UseTypingReturn,
-  ExtendedSession,
 } from "@/types";
-
-interface UseTypingProps {
-  socket: Socket | null;
-  currentRoom: string;
-  session: ExtendedSession | null;
-}
 
 export function useTyping({
   socket,
@@ -26,19 +20,11 @@ export function useTyping({
   const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const startTyping = useCallback(() => {
-    console.log("🔥 startTyping called", {
-      socket: !!socket,
-      connected: socket?.connected,
-      session: !!session,
-    });
-
     if (!socket?.connected || !session) {
-      console.log("❌ startTyping blocked - socket or session missing");
       return;
     }
 
     if (!isTyping) {
-      console.log("✅ Setting isTyping to true and emitting socket event");
       setIsTyping(true);
       const typingData: TypingData = {
         room: currentRoom,
@@ -46,15 +32,12 @@ export function useTyping({
         userId: session.user?.id || "unknown",
       };
       socket.emit("user_typing_start", typingData);
-      console.log("📤 Emitted user_typing_start:", typingData);
     }
 
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // Auto-stop typing after 3 seconds
     typingTimeoutRef.current = setTimeout(() => {
       stopTyping();
     }, 3000);
@@ -81,13 +64,11 @@ export function useTyping({
 
   const handleInputChange = useCallback(
     (value: string) => {
-      // Clear existing debounce
       if (typingDebounceRef.current) {
         clearTimeout(typingDebounceRef.current);
       }
 
       if (value.trim()) {
-        // Start typing after 500ms delay
         typingDebounceRef.current = setTimeout(() => {
           startTyping();
         }, 500);
@@ -102,7 +83,6 @@ export function useTyping({
     setTypingUsers([]);
   }, []);
 
-  // Socket event handlers
   useEffect(() => {
     if (!socket) return;
 
@@ -110,27 +90,12 @@ export function useTyping({
       const currentUserId = session?.user?.id;
       const isFromCurrentUser = data.userId === currentUserId;
 
-      console.log("👂 Received user_typing:", {
-        data,
-        currentUserId,
-        isFromCurrentUser,
-        comparison: `${data.userId} === ${currentUserId}`,
-        types: `${typeof data.userId} === ${typeof currentUserId}`,
-      });
-
       if (data.room === currentRoom && !isFromCurrentUser) {
-        console.log("✅ Adding typing user:", data.username);
         setTypingUsers((prev) => {
           const newUsers = !prev.includes(data.username)
             ? [...prev, data.username]
             : prev;
-          console.log("👥 Updated typing users:", newUsers);
           return newUsers;
-        });
-      } else {
-        console.log("❌ Typing user not added:", {
-          wrongRoom: data.room !== currentRoom,
-          isFromCurrentUser,
         });
       }
     };
@@ -153,18 +118,11 @@ export function useTyping({
     };
   }, [socket, currentRoom, session]);
 
-  // Cleanup on room change - ONLY depend on currentRoom
   useEffect(() => {
-    console.log(
-      "🏠 Room changed to:",
-      currentRoom,
-      "- stopping typing and clearing users"
-    );
     stopTyping();
     clearTypingUsers();
-  }, [currentRoom]); // Remove stopTyping and clearTypingUsers from dependencies
+  }, [currentRoom, stopTyping, clearTypingUsers]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) {

@@ -1,7 +1,14 @@
--- Chat App Database Schema (Final)
--- Tested and working with NextAuth v4 + Google OAuth
+-- =============================================================================
+-- CHAT APPLICATION DATABASE SCHEMA
+-- =============================================================================
+-- Production-ready schema for real-time chat application
+-- Compatible with NextAuth v4 + Google OAuth + Neon PostgreSQL
 
--- NextAuth required tables (with correct column names)
+-- =============================================================================
+-- NEXTAUTH REQUIRED TABLES
+-- =============================================================================
+-- These tables are required by NextAuth for authentication
+
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   name VARCHAR(100),
@@ -46,9 +53,16 @@ CREATE TABLE IF NOT EXISTS verification_tokens (
   PRIMARY KEY (identifier, token)
 );
 
--- Chat application tables
+-- =============================================================================
+-- CUSTOM TYPES
+-- =============================================================================
+
 CREATE TYPE room_type AS ENUM ('dm', 'group', 'public_channel');
 CREATE TYPE member_role AS ENUM ('member', 'admin', 'owner');
+
+-- =============================================================================
+-- CHAT APPLICATION TABLES
+-- =============================================================================
 
 CREATE TABLE IF NOT EXISTS rooms (
   id SERIAL PRIMARY KEY,
@@ -73,13 +87,14 @@ CREATE TABLE IF NOT EXISTS messages (
   room_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   content TEXT NOT NULL,
-  attachment_url VARCHAR(500),
-  attachment_type VARCHAR(50),
   sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   edited_at TIMESTAMPTZ
 );
 
--- Foreign key constraints
+-- =============================================================================
+-- FOREIGN KEY CONSTRAINTS
+-- =============================================================================
+
 ALTER TABLE accounts ADD CONSTRAINT fk_accounts_user 
   FOREIGN KEY ("userId") REFERENCES users(id) ON DELETE CASCADE;
 
@@ -104,20 +119,29 @@ ALTER TABLE messages ADD CONSTRAINT fk_messages_room
 ALTER TABLE messages ADD CONSTRAINT fk_messages_user 
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
--- Performance indexes
+-- =============================================================================
+-- PERFORMANCE INDEXES
+-- =============================================================================
+
+-- NextAuth indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions("sessionToken");
 CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts("userId");
 CREATE INDEX IF NOT EXISTS idx_accounts_provider ON accounts(provider, "providerAccountId");
-CREATE INDEX IF NOT EXISTS idx_messages_room_created ON messages(room_id, sent_at);
+
+-- Chat application indexes
+CREATE INDEX IF NOT EXISTS idx_messages_room_sent ON messages(room_id, sent_at);
 CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users("lastSeen");
 
--- Comments
-COMMENT ON TABLE rooms IS 'All chat conversations - DMs, groups, and public channels';
-COMMENT ON TABLE room_members IS 'Junction table for room membership with roles';
-COMMENT ON TABLE messages IS 'All chat messages with optional file attachments';
-COMMENT ON COLUMN rooms.name IS 'Auto-generated for DMs (John, Sarah) or custom for groups';
-COMMENT ON COLUMN room_members.added_by IS 'References user who added this member (self for creators)';
+-- =============================================================================
+-- TABLE DOCUMENTATION
+-- =============================================================================
+
+COMMENT ON TABLE rooms IS 'Chat rooms: DMs, groups, and public channels';
+COMMENT ON TABLE room_members IS 'Room membership with user roles (owner/admin/member)';
+COMMENT ON TABLE messages IS 'All chat messages with edit tracking';
+
+COMMENT ON COLUMN rooms.name IS 'Display name for the room';
+COMMENT ON COLUMN room_members.added_by IS 'User who added this member (self for creators)';
 COMMENT ON COLUMN messages.edited_at IS 'NULL for unedited messages, timestamp for edited ones';

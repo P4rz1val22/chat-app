@@ -1,19 +1,14 @@
-// components/room-manage-modal.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useSession } from "next-auth/react";
 import type { Room } from "@/types";
 
 interface RoomManageModalProps {
   isOpen: boolean;
   onClose: () => void;
   room: Room | null;
-  onAddMember: (username: string) => void;
-}
-
-interface RoomMember {
-  id: string;
-  name: string;
-  email?: string;
-  username?: string;
+  onAddMember: (email: string) => void;
+  onDeleteRoom: (roomId: string) => void;
+  roomCreator: string;
 }
 
 export default function RoomManageModal({
@@ -21,49 +16,103 @@ export default function RoomManageModal({
   onClose,
   room,
   onAddMember,
+  onDeleteRoom,
+  roomCreator,
 }: RoomManageModalProps) {
-  const [newMemberUsername, setNewMemberUsername] = useState("");
-  const [members, setMembers] = useState<RoomMember[]>([]);
+  const { data: session } = useSession();
+  const [memberEmail, setMemberEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
+
+  const canDelete = room?.createdBy == session?.user?.id;
 
   useEffect(() => {
-    if (isOpen && room) {
-      // TODO: Fetch room members when modal opens
-      // For now, we'll just show the add member functionality
-      setMembers([]);
+    if (isOpen) {
+      document.body.style.overflow = "hidden";
+      firstInputRef.current?.focus();
+    } else {
+      document.body.style.overflow = "unset";
     }
-  }, [isOpen, room]);
+
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener("keydown", handleEscape);
+    }
+
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen, onClose]);
 
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!newMemberUsername.trim()) return;
+    if (!memberEmail.trim()) return;
 
     setIsLoading(true);
-    onAddMember(newMemberUsername.trim());
-    setNewMemberUsername("");
+    onAddMember(memberEmail.trim());
+    setMemberEmail("");
     setIsLoading(false);
+  };
+
+  const handleDeleteRoom = () => {
+    if (!room) return;
+    onDeleteRoom(room.id);
+    onClose();
+  };
+
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
   };
 
   if (!isOpen || !room) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={handleOverlayClick}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="manage-room-title"
+    >
+      <div
+        ref={modalRef}
+        className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
+        role="document"
+      >
         <div className="p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-800">
+            <h2
+              id="manage-room-title"
+              className="text-xl font-bold text-gray-800"
+            >
               Manage Room: {room.name}
             </h2>
             <button
               onClick={onClose}
-              className="text-gray-500 hover:text-gray-700 transition-colors"
+              className="text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded transition-colors"
+              aria-label="Close dialog"
             >
               <svg
                 className="w-6 h-6"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -75,7 +124,6 @@ export default function RoomManageModal({
             </button>
           </div>
 
-          {/* Room Info */}
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
             <div className="text-sm text-gray-600 mb-2">
               <span className="font-medium">Type:</span> {room.type}
@@ -84,52 +132,77 @@ export default function RoomManageModal({
               <span className="font-medium">Privacy:</span>{" "}
               {room.isPrivate ? "Private" : "Public"}
             </div>
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-gray-600 mb-2">
               <span className="font-medium">Members:</span> {room.memberCount}
+            </div>
+            <div className="text-sm text-blue-600">
+              <span className="font-medium">
+                Room Owner: {roomCreator}
+                {room?.createdBy == session?.user?.id && " (You)"}
+              </span>
             </div>
           </div>
 
-          {/* Add Member Form */}
           <form onSubmit={handleAddMember} className="space-y-4">
             <div>
               <label
-                htmlFor="newMemberUsername"
+                htmlFor="memberEmail"
                 className="block text-sm font-medium text-gray-700 mb-1"
               >
-                Add Member
+                Add Member by Email
               </label>
               <input
-                type="text"
-                id="newMemberUsername"
-                value={newMemberUsername}
-                onChange={(e) => setNewMemberUsername(e.target.value)}
-                placeholder="Enter username"
+                ref={firstInputRef}
+                type="email"
+                id="memberEmail"
+                value={memberEmail}
+                onChange={(e) => setMemberEmail(e.target.value)}
+                placeholder="Enter email address"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 disabled={isLoading}
+                required
+                aria-describedby="email-help"
               />
-              <p className="text-xs text-gray-500 mt-1">
-                User will be added immediately (no invitation needed)
-              </p>
+              <div id="email-help" className="text-xs text-gray-500 mt-1">
+                User will be added immediately if they have an account
+              </div>
             </div>
 
-            {/* Buttons */}
             <div className="flex justify-end space-x-3 pt-4">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                disabled={isLoading}
               >
                 Close
               </button>
               <button
                 type="submit"
-                disabled={!newMemberUsername.trim() || isLoading}
-                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                disabled={!memberEmail.trim() || isLoading}
+                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
               >
                 {isLoading ? "Adding..." : "Add Member"}
               </button>
             </div>
           </form>
+
+          {canDelete && (
+            <div className="border-t border-gray-200 pt-4 mt-6">
+              <h3 className="font-semibold mb-2 text-red-600">Danger Zone</h3>
+              <p className="text-sm text-gray-600 mb-3">
+                Delete this room permanently. This will remove all messages and
+                members.
+              </p>
+              <button
+                onClick={handleDeleteRoom}
+                className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+                aria-label={`Delete room ${room.name}`}
+              >
+                Delete Room
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

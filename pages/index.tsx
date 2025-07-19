@@ -1,10 +1,19 @@
-// pages/index.tsx
 import { useSession } from "next-auth/react";
 import { useState, useEffect, useRef } from "react";
 import AuthButton from "@/components/auth-button";
 import ChatHeader from "@/components/chat-header";
+import TypingIndicator from "@/components/typing-indicator";
+import MessageList from "@/components/message-list";
+import RoomSidebar from "@/components/room-sidebar";
+import MessageInput from "@/components/message-input";
+import RoomHeader from "@/components/room-header";
+import CreateRoomModal from "@/components/create-room-modal";
+import RoomManageModal from "@/components/room-manage-modal";
 import { useSocket } from "@/hooks/use-socket";
 import { useTyping } from "@/hooks/use-typing";
+import { useRoomManagement } from "@/hooks/use-room-management";
+import { useUserCache } from "@/hooks/use-user-cache";
+import { useMessaging } from "@/hooks/use-messaging";
 import type {
   Message,
   Room,
@@ -16,26 +25,20 @@ import type {
   MessageErrorData,
   ExtendedSession,
   CreateRoomForm,
+  User,
 } from "../types";
-import TypingIndicator from "@/components/typing-indicator";
-import MessageList from "@/components/message-list";
-import RoomSidebar from "@/components/room-sidebar";
-import MessageInput from "@/components/message-input";
-import RoomHeader from "@/components/room-header";
-import CreateRoomModal from "@/components/create-room-modal";
-import RoomManageModal from "@/components/room-manage-modal";
 
 export default function Home() {
   const { data: session } = useSession();
   const [currentRoom, setCurrentRoom] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomSearch, setRoomSearch] = useState("");
   const [isCreateRoomModalOpen, setIsCreateRoomModalOpen] = useState(false);
   const [isRoomManageModalOpen, setIsRoomManageModalOpen] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const { socket, isConnected, connect } = useSocket();
   const { typingUsers, startTyping, stopTyping, handleInputChange } = useTyping(
     {
@@ -44,6 +47,38 @@ export default function Home() {
       session: session as ExtendedSession,
     }
   );
+
+  const { getUsernameById, handleUserInfo, setUserCache } = useUserCache({
+    socket,
+  });
+
+  const {
+    filteredRooms,
+    currentRoomName,
+    handleCreateRoom,
+    handleDeleteRoom,
+    handleAddMember,
+    switchRoom,
+  } = useRoomManagement({
+    socket,
+    session: session as ExtendedSession,
+    rooms,
+    currentRoom,
+    roomSearch,
+    setCurrentRoom,
+    setMessages,
+    stopTyping,
+  });
+
+  const { newMessage, sendMessage, handleMessageInputChange } = useMessaging({
+    socket,
+    session: session as ExtendedSession,
+    currentRoom,
+    rooms,
+    setMessages,
+    stopTyping,
+    handleInputChange,
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -54,43 +89,52 @@ export default function Home() {
   }, [messages]);
 
   useEffect(() => {
-    if (session) {
-      console.log("🔍 Session data:", session);
-      console.log("🔍 User ID:", session.user?.id);
-      console.log("🔍 User email:", session.user?.email);
-    }
-  }, [session]);
-
-  useEffect(() => {
     if (!session) return;
 
     const socketInstance = connect();
 
     const handleConnect = () => {
-      console.log("🔌 Connected to socket, fetching rooms...");
-
-      // FIXED: Just get rooms, don't join any room yet
       socketInstance.emit("get_rooms", {
         userId: session.user?.id || "",
       });
     };
 
+    const handleRoomDeleted = (data: {
+      roomId: string;
+      deletedBy: string;
+      roomName: string;
+    }) => {
+      setRooms((prev) => prev.filter((room) => room.id !== data.roomId));
+
+      if (currentRoom === data.roomId) {
+        const remainingRooms = rooms.filter((room) => room.id !== data.roomId);
+        if (remainingRooms.length > 0) {
+          const firstRoom = remainingRooms[0];
+          setCurrentRoom(firstRoom.id);
+          setMessages([]);
+
+          if (socket?.connected) {
+            const joinData: JoinRoomData = {
+              room: firstRoom.id,
+              username: session?.user?.name || "Anonymous",
+            };
+            socket.emit("join_room", joinData);
+          }
+        } else {
+          setCurrentRoom("");
+          setMessages([]);
+        }
+      }
+    };
+
     const handleRoomsList = (data: { rooms: Room[] }) => {
-      console.log("📋 Received rooms list:", data.rooms);
       setRooms(data.rooms);
 
-      // FIXED: Auto-select and join first room if available
       if (isInitialLoad && data.rooms.length > 0 && !currentRoom) {
         const firstRoom = data.rooms[0];
-        console.log(
-          `🏠 Auto-selecting first room: ${firstRoom.name} (${firstRoom.id})`
-        );
-
-        // Set current room first
         setCurrentRoom(firstRoom.id);
         setIsInitialLoad(false);
 
-        // FIXED: Join room with proper validation
         if (firstRoom.id && firstRoom.id !== "") {
           const joinData: JoinRoomData = {
             room: firstRoom.id,
@@ -166,12 +210,9 @@ export default function Home() {
     };
 
     const handleRoomCreated = (data: any) => {
-      console.log("🏗️ Room created:", data);
-
       setRooms((prev) => [...prev, data.room]);
 
       if (data.createdBy === session.user?.name) {
-        console.log("🚪 Auto-switching to new room:", data.room.name);
         setCurrentRoom(data.room.id);
         setMessages([]);
         setIsInitialLoad(false);
@@ -184,7 +225,6 @@ export default function Home() {
     }) => {
       const currentUserId = (session as any)?.user?.id?.toString();
       if (data.userId === currentUserId) {
-        console.log("📋 Received room update for current user:", data.rooms);
         setRooms(data.rooms);
       }
     };
@@ -192,10 +232,12 @@ export default function Home() {
     socketInstance.on("connect", handleConnect);
     socketInstance.on("chat_message", handleChatMessage);
     socketInstance.on("message_history", handleMessageHistory);
+    socketInstance.on("user_info", handleUserInfo);
     socketInstance.on("message_error", handleMessageError);
     socketInstance.on("room_created", handleRoomCreated);
     socketInstance.on("rooms_list", handleRoomsList);
     socketInstance.on("user_rooms_updated", handleUserRoomsUpdated);
+    socketInstance.on("room_deleted", handleRoomDeleted);
     socketInstance.on("error", handleError);
 
     if (socketInstance.connected) {
@@ -206,121 +248,15 @@ export default function Home() {
       socketInstance.off("connect", handleConnect);
       socketInstance.off("chat_message", handleChatMessage);
       socketInstance.off("message_history", handleMessageHistory);
+      socketInstance.off("user_info", handleUserInfo);
       socketInstance.off("message_error", handleMessageError);
       socketInstance.off("room_created", handleRoomCreated);
       socketInstance.off("rooms_list", handleRoomsList);
       socketInstance.off("user_rooms_updated", handleUserRoomsUpdated);
+      socketInstance.off("room_deleted", handleRoomDeleted);
       socketInstance.off("error", handleError);
     };
-  }, [session, currentRoom, connect, isInitialLoad]);
-
-  const handleMessageInputChange = (value: string) => {
-    setNewMessage(value);
-    handleInputChange(value);
-  };
-
-  const sendMessage = () => {
-    if (!newMessage.trim() || !session || !socket?.connected) return;
-
-    // FIXED: Validate current room
-    if (!currentRoom || currentRoom === "") {
-      console.error("❌ No room selected");
-      return;
-    }
-
-    // FIXED: Validate user ID
-    if (!session.user?.id) {
-      console.error("❌ No user ID available");
-      return;
-    }
-
-    const currentRoomData = rooms.find((room) => room.id === currentRoom);
-    if (!currentRoomData) {
-      console.error("❌ Current room not found in rooms list");
-      return;
-    }
-
-    stopTyping();
-
-    const messageText = newMessage.trim();
-    const tempId = `temp_${Date.now()}_${Math.random()}`;
-
-    const optimisticMessage: Message = {
-      id: tempId,
-      text: messageText,
-      username: session.user?.name || "Anonymous",
-      timestamp: new Date().toLocaleTimeString(),
-      userId: session.user?.id || "unknown",
-      isOptimistic: true,
-    };
-
-    setMessages((prev) => [...prev, optimisticMessage]);
-    setNewMessage("");
-
-    const sendData: SendMessageData = {
-      message: messageText,
-      username: session.user?.name || "Anonymous",
-      userId: session.user?.id || "unknown",
-      room: currentRoom,
-      tempId: tempId,
-    };
-
-    socket.emit("send_chat_message", sendData);
-  };
-
-  const filteredRooms = rooms.filter((room) =>
-    room.name.toLowerCase().includes(roomSearch.toLowerCase())
-  );
-
-  const handleCreateRoom = async (roomData: CreateRoomForm) => {
-    if (!socket?.connected || !session) return;
-
-    const createData = {
-      ...roomData,
-      createdById: session.user?.id || "unknown",
-    };
-
-    socket.emit("create_room", createData);
-  };
-
-  const handleAddMember = (email: string) => {
-    if (!socket?.connected || !session) return;
-
-    socket.emit("add_member", {
-      roomId: currentRoom,
-      email: email,
-      addedBy: session.user?.id || "unknown",
-    });
-  };
-
-  const switchRoom = (newRoomId: string) => {
-    if (!socket?.connected || !session) return;
-
-    // FIXED: Validate room ID before switching
-    if (!newRoomId || newRoomId === "") {
-      console.error("❌ Cannot switch to empty room ID");
-      return;
-    }
-
-    // Validate room exists
-    const roomExists = rooms.find((room) => room.id === newRoomId);
-    if (!roomExists) {
-      console.error(`❌ Room ${newRoomId} not found`);
-      return;
-    }
-
-    stopTyping();
-
-    const switchData: SwitchRoomData = {
-      oldRoom: currentRoom || "none", // Handle empty currentRoom
-      newRoom: newRoomId,
-      username: session?.user?.name || "Anonymous",
-    };
-    socket.emit("switch_room", switchData);
-
-    setCurrentRoom(newRoomId);
-    setMessages([]);
-  };
+  }, [session, currentRoom, connect, isInitialLoad, handleUserInfo]);
 
   if (!session) {
     return (
@@ -389,7 +325,7 @@ export default function Home() {
 
       <div className="flex h-[calc(100vh-73px)]">
         <RoomSidebar
-          rooms={rooms}
+          rooms={filteredRooms}
           currentRoom={currentRoom}
           roomSearch={roomSearch}
           onRoomChange={switchRoom}
@@ -398,7 +334,6 @@ export default function Home() {
         />
 
         <div className="flex-1 flex flex-col">
-          {/* FIXED: Only show room header and messages if a room is selected */}
           {currentRoom ? (
             <>
               <RoomHeader
@@ -419,10 +354,8 @@ export default function Home() {
                 value={newMessage}
                 onChange={handleMessageInputChange}
                 onSend={sendMessage}
-                onTyping={startTyping}
-                onStopTyping={stopTyping}
                 disabled={!isConnected}
-                placeholder={`Message #${currentRoom}`}
+                placeholder={`Message #${currentRoomName}`}
               />
             </>
           ) : (
@@ -438,7 +371,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Modals */}
       <CreateRoomModal
         isOpen={isCreateRoomModalOpen}
         onClose={() => setIsCreateRoomModalOpen(false)}
@@ -450,6 +382,10 @@ export default function Home() {
         onClose={() => setIsRoomManageModalOpen(false)}
         room={rooms.find((room) => room.id === currentRoom) || null}
         onAddMember={handleAddMember}
+        onDeleteRoom={handleDeleteRoom}
+        roomCreator={getUsernameById(
+          rooms.find((room) => room.id === currentRoom)?.createdBy || ""
+        )}
       />
     </div>
   );
