@@ -17,15 +17,11 @@ import { useMessaging } from "@/hooks/use-messaging";
 import type {
   Message,
   Room,
-  SendMessageData,
   ChatMessageData,
   JoinRoomData,
-  SwitchRoomData,
   MessageHistoryData,
   MessageErrorData,
   ExtendedSession,
-  CreateRoomForm,
-  User,
 } from "../types";
 
 export default function Home() {

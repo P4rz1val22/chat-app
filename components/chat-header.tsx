@@ -1,5 +1,6 @@
 import { ChatHeaderProps, ExtendedSession } from "@/types";
 import AuthButton from "./auth-button";
+import Image from "next/image";
 
 export default function ChatHeader({ session, isConnected }: ChatHeaderProps) {
   return (
@@ -25,7 +26,7 @@ export default function ChatHeader({ session, isConnected }: ChatHeaderProps) {
           </div>
 
           <div className="flex items-center space-x-2">
-            <img
+            <Image
               src={session.user?.image || "/default-avatar.png"}
               alt={`${session.user?.name || "User"} profile picture`}
               className="w-8 h-8 rounded-full"

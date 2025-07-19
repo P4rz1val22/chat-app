@@ -3,14 +3,17 @@ import { io, Socket } from "socket.io-client";
 class SocketService {
   private socket: Socket | null = null;
 
+  // In lib/socket.ts, update the connect method:
   connect(): Socket {
     if (this.socket?.connected) {
       return this.socket;
     }
 
     this.socket = io({
-      transports: ["polling"], // Force polling only
-      upgrade: false, // Don't try to upgrade to websockets
+      transports: ["polling"],
+      upgrade: false,
+      timeout: 20000,
+      forceNew: true,
     });
 
     this.socket.on("connect_error", (error) => {
