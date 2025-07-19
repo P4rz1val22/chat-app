@@ -8,7 +8,10 @@ class SocketService {
       return this.socket;
     }
 
-    this.socket = io();
+    this.socket = io({
+      transports: ["polling"], // Force polling only
+      upgrade: false, // Don't try to upgrade to websockets
+    });
 
     this.socket.on("connect_error", (error) => {
       console.error("❌ Socket.io connection error:", error);
